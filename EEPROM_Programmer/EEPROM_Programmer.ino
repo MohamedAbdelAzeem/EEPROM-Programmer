@@ -2,109 +2,132 @@
 #define SHIFT_CLK 3
 #define SHIFT_LATCH 4
 #define EEPROM_D0 5
-#define EEPORM_D7 12
+#define EEPROM_D7 12
 #define WRITE_EN 13
 
-void Set_value(int value, bool outputEnable)
-{
-  // we will tide the last bit of the second shift register with the OUTPUT ENABLE PIN in the 
-  //EEPROM, So we need to handle it with the first shiftOut func. 
-  /* 0000 0111    value>>8
-   *|1000 0000    if ouputEnable is False (EEPROM set in input mode) = 0x80 
-   * 1000 0111    so add the outpit enable bit in the last digit of the shiftregister 
-   *              because we make it MSBFIRST.
-   */
-  shiftOut(SHIFT_DATA, SHIFT_CLK, MSBFIRST, (value>>8)| (outputEnable ? 0x00 : 0x80)); // TO SHIFT THE TOP 3 BITS FIRST into 
-  //the second shift regiter
-  shiftOut(SHIFT_DATA, SHIFT_CLK, MSBFIRST, value);
-  // moving data form data register to storage register.
+/*
+ * Output the address bits and outputEnable signal using shift registers.
+ */
+void setAddress(int address, bool outputEnable) {
+  shiftOut(SHIFT_DATA, SHIFT_CLK, MSBFIRST, (address >> 8) | (outputEnable ? 0x00 : 0x80));
+  shiftOut(SHIFT_DATA, SHIFT_CLK, MSBFIRST, address);
+
   digitalWrite(SHIFT_LATCH, LOW);
   digitalWrite(SHIFT_LATCH, HIGH);
   digitalWrite(SHIFT_LATCH, LOW);
 }
 
-byte readEEPROM_byte(int Address)
-{
-  for(int pin = EEPROM_D0 ; pin <= EEPROM_D7; pin++)
-  {
+
+/*
+ * Read a byte from the EEPROM at the specified address.
+ */
+byte readEEPROM(int address) {
+  for (int pin = EEPROM_D0; pin <= EEPROM_D7; pin += 1) {
     pinMode(pin, INPUT);
   }
-  Set_value(Address, true /*EEPROM IN READ MODE*/);
-  byte data = 0 ;
-  for(int pin = EEPORM_D7 ; pin >= EEPROM_D0 ; pin--)
-  {
+  setAddress(address, /*outputEnable*/ true);
+
+  byte data = 0;
+  for (int pin = EEPROM_D7; pin >= EEPROM_D0; pin -= 1) {
     data = (data << 1) + digitalRead(pin);
-    /* (1) 0000 0000 shifted to 0000 0001 if the D7 is 1 
-     *  and we add the value of the pin from D7 to D0 and shift every value 
-     *  0000 0001
-     *  0000 0011
-     *  0000 0111
-     *  0000 1111  
-     *  ...
-     *  1111 1111   if D7 to D0 is 1 
-     */
-     return data; 
   }
+  return data;
 }
 
-void printEEPROM_CONTENT()
-{
-  for(int pin = EEPROM_D0 ; pin <= EEPROM_D7; pin++)
-  {
-    pinMode(pin, INPUT);
-  }
-  Serial.begin(57600);
-  // we will print 16 bytes in one line
-  for(int base = 0 ; base <= 255 ; base+=16) //in one line 16 bytes
-  {// we can put base <= 2048 if we want to read everything in the EEPORM.
-    byte data[16]; //array of byts in each line 
-    for(int offset = 0 ; offset <= 15;offset++)
-    {
-      data[offset] = readEEPROM_byte(base + offset);
-    }
 
-    char buff[80];
-    sprintf(buf, "%03x: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
-    base , data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8], data[9],
-     , data[10], data[12], data[13], , data[14], data[15]);
-  }
-  Serial.println(buf);
-}
-
-void writeEEPORM(int address, int data0)
-{
-  for(int pin = EEPROM_D0 ; pin <= EEPROM_D7; pin++)
-  {
+/*
+ * Write a byte to the EEPROM at the specified address.
+ */
+void writeEEPROM(int address, byte data) {
+  setAddress(address, /*outputEnable*/ false);
+  for (int pin = EEPROM_D0; pin <= EEPROM_D7; pin += 1) {
     pinMode(pin, OUTPUT);
   }
-  Set_Adress(address, false /*write mode*/);
-  for (int pin = EEPROM_D0 ; pin <= EEPROM_D7 ; pin++)
-  {
-    digitalWrite(pin, data & 1); //to get the LSB of the data and output it 
-    //we need to get the second bit 
-    data = data << 1 ;
+
+  for (int pin = EEPROM_D0; pin <= EEPROM_D7; pin += 1) {
+    digitalWrite(pin, data & 1);
+    data = data >> 1;
   }
   digitalWrite(WRITE_EN, LOW);
   delayMicroseconds(1);
   digitalWrite(WRITE_EN, HIGH);
-  delay(10); //to be tested
-  
-  
+  delay(10);
 }
-  
-   
+
+
+/*
+ * Read the contents of the EEPROM and print them to the serial monitor.
+ */
+void printContents() {
+  for (int base = 0; base <= 255; base += 16) {
+    byte data[16];
+    for (int offset = 0; offset <= 15; offset += 1) {
+      data[offset] = readEEPROM(base + offset);
+    }
+
+    char buf[80];
+    sprintf(buf, "%03x:  %02x %02x %02x %02x %02x %02x %02x %02x   %02x %02x %02x %02x %02x %02x %02x %02x",
+            base, data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+            data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15]);
+
+    Serial.println(buf);
+  }
+}
+
+
+void Erasing_EEPROM()
+{
+    // Erase entire EEPROM
+  Serial.print("Erasing EEPROM");
+  for (int address = 0; address <= 2047; address += 1) {
+    writeEEPROM(address, 0x11);
+
+    if (address % 64 == 0) {
+      Serial.print(".");
+    }
+  }
+  Serial.println(" done");
+}
+
+
+// 4-bit hex decoder for common anode 7-segment display
+byte data[] = { 0x81, 0xcf, 0x92, 0x86, 0xcc, 0xa4, 0xa0, 0x8f, 0x80, 0x84, 0x88, 0xe0, 0xb1, 0xc2, 0xb0, 0xb8 };
+
+// 4-bit hex decoder for common cathode 7-segment display
+// byte data[] = { 0x7e, 0x30, 0x6d, 0x79, 0x33, 0x5b, 0x5f, 0x70, 0x7f, 0x7b, 0x77, 0x1f, 0x4e, 0x3d, 0x4f, 0x47 };
+
 
 void setup() {
   // put your setup code here, to run once:
   pinMode(SHIFT_DATA, OUTPUT);
   pinMode(SHIFT_CLK, OUTPUT);
-  pinMode(SHIFT_LATCH, OUTPUT); 
+  pinMode(SHIFT_LATCH, OUTPUT);
+  pinMode(WRITE_EN, OUTPUT);
+  digitalWrite(WRITE_EN, HIGH);
+ 
+  Serial.begin(57600);
 
-   digitalWrite(WRITE_EN, HIGH);  // we set the write_en high if we want to write we pulse it low.
-   pinMode(WRITE_EN, OUTPUT);    // after digitalwirte to make sure that the pin already high.
 
-   
+
+    Erasing_EEPROM();
+
+//  // Program data bytes
+//  Serial.print("Programming EEPROM");
+//  for (int address = 0; address < sizeof(data); address += 1) {
+//    writeEEPROM(address, data[address]);
+//
+//    if (address % 64 == 0) {
+//      Serial.print(".");
+//    }
+//  }
+//  Serial.println(" done");
+
+
+  // Read and print out the contents of the EERPROM
+  Serial.println("Reading EEPROM");
+  printContents();
 }
+
 
 void loop() {
   // put your main code here, to run repeatedly:
